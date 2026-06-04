@@ -1,13 +1,12 @@
 import Stripe from 'stripe';
-import { env } from '../config/env.js';
+import { env } from '../config/env';
 
-let stripeInstance: Stripe | null = null;
-
-export function getStripeClient(): Stripe {
-  if (!stripeInstance) {
-    stripeInstance = new Stripe(env.STRIPE_SECRET_KEY, {
-      apiVersion: '2024-04-10',
-    });
-  }
-  return stripeInstance;
-}
+/**
+ * Stripe client singleton.
+ * Initialised once and reused across all modules to avoid creating
+ * multiple instances (each of which would open its own HTTP keep-alive pool).
+ */
+export const stripe = new Stripe(env.STRIPE_SECRET_KEY, {
+  apiVersion: '2024-04-10',
+  typescript: true,
+});

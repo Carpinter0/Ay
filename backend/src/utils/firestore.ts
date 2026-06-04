@@ -1,167 +1,247 @@
-/**
- * Firestore REST API helpers for converting between Firestore REST value format
- * and TypeScript objects.
- *
- * This module handles all Firestore REST value types:
- * - stringValue
- * - integerValue
- * - booleanValue
- * - doubleValue
- * - arrayValue
- * - mapValue
- * - timestampValue
- * - nullValue
- */
+import { env } from '../config/env';
+import { FIRESTORE_BASE_URL } from '../config/firebase';
+import logger from './logger';
 
-import { FIRESTORE_BASE_URL } from '../config/firebase.js';
-
-type FirestoreValue =
+// ---------------------------------------------------------------------------
+// Firestore REST value type
+// Using `unknown` here is intentional: Firestore REST responses are deeply
+// nested, dynamically typed JSON. Narrowing happens in fromREST() below.
+// ---------------------------------------------------------------------------
+type FSValue =
   | { stringValue: string }
   | { integerValue: string }
-  | { booleanValue: boolean }
   | { doubleValue: number }
-  | { arrayValue: { values: FirestoreValue[] } }
-  | { mapValue: { fields: Record<string, FirestoreValue> } }
+  | { booleanValue: boolean }
+  | { nullValue: null }
   | { timestampValue: string }
-  | { nullValue: null };
+  | { arrayValue: { values?: FSValue[] } }
+  | { mapValue: { fields: Record<string, FSValue> } };
 
-type FirestoreDocument = {
-  name: string;
-  fields: Record<string, FirestoreValue>;
-  createTime?: string;
-  updateTime?: string;
-};
+type FSFields = Record<string, FSValue>;
 
-/**
- * Convert a TypeScript value to Firestore REST format.
- */
-export function toFirestoreValue(value: unknown): FirestoreValue {
-  if (value === null || value === undefined) {
-    return { nullValue: null };
-  }
+// ---------------------------------------------------------------------------
+// mapToREST — converts a plain JS object to Firestore REST fields format
+// ---------------------------------------------------------------------------
+export function mapToREST(data: Record<string, unknown>): FSFields {
+  const fields: FSFields = {};
 
-  if (typeof value === 'string') {
-    return { stringValue: value };
-  }
-
-  if (typeof value === 'boolean') {
-    return { booleanValue: value };
-  }
-
-  if (typeof value === 'number') {
-    if (Number.isInteger(value)) {
-      return { integerValue: value.toString() };
+  for (const [key, value] of Object.entries(data)) {
+    if (value === undefined || value === null) {
+      fields[key] = { nullValue: null };
+    } else if (typeof value === 'string') {
+      fields[key] = { stringValue: value };
+    } else if (typeof value === 'number') {
+      Number.isInteger(value)
+        ? (fields[key] = { integerValue: value.toString() })
+        : (fields[key] = { doubleValue: value });
+    } else if (typeof value === 'boolean') {
+      fields[key] = { booleanValue: value };
+    } else if (Array.isArray(value)) {
+      fields[key] = {
+        arrayValue: {
+          values: value.map((item) => {
+            const wrapped = mapToREST({ v: item as unknown as Record<string, unknown> });
+            return wrapped['v'] as FSValue;
+          }),
+        },
+      };
+    } else if (typeof value === 'object') {
+      fields[key] = {
+        mapValue: { fields: mapToREST(value as Record<string, unknown>) },
+      };
     }
-    return { doubleValue: value };
   }
 
-  if (value instanceof Date) {
-    return { timestampValue: value.toISOString() };
-  }
-
-  if (Array.isArray(value)) {
-    return {
-      arrayValue: {
-        values: value.map(toFirestoreValue),
-      },
-    };
-  }
-
-  if (typeof value === 'object') {
-    const obj = value as Record<string, unknown>;
-    const fields: Record<string, FirestoreValue> = {};
-    for (const [k, v] of Object.entries(obj)) {
-      fields[k] = toFirestoreValue(v);
-    }
-    return { mapValue: { fields } };
-  }
-
-  // Fallback: convert to string
-  return { stringValue: String(value) };
+  return fields;
 }
 
-/**
- * Convert a Firestore REST value to a TypeScript object.
- */
-export function fromFirestoreValue(value: FirestoreValue): unknown {
-  if ('stringValue' in value) {
-    return value.stringValue;
+// ---------------------------------------------------------------------------
+// fromREST — converts Firestore REST fields format back to a plain JS object
+// ---------------------------------------------------------------------------
+export function fromREST(fields: FSFields): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+
+  for (const [key, value] of Object.entries(fields)) {
+    result[key] = unwrapValue(value);
   }
 
-  if ('integerValue' in value) {
-    return parseInt(value.integerValue, 10);
-  }
+  return result;
+}
 
-  if ('booleanValue' in value) {
-    return value.booleanValue;
-  }
-
-  if ('doubleValue' in value) {
-    return value.doubleValue;
-  }
-
+function unwrapValue(value: FSValue): unknown {
+  if ('stringValue' in value) return value.stringValue;
+  if ('integerValue' in value) return parseInt(value.integerValue, 10);
+  if ('doubleValue' in value) return value.doubleValue;
+  if ('booleanValue' in value) return value.booleanValue;
+  if ('nullValue' in value) return null;
+  if ('timestampValue' in value) return value.timestampValue;
   if ('arrayValue' in value) {
-    return (value.arrayValue.values || []).map(fromFirestoreValue);
+    return (value.arrayValue.values ?? []).map(unwrapValue);
   }
-
   if ('mapValue' in value) {
-    const result: Record<string, unknown> = {};
-    const fields = value.mapValue.fields || {};
-    for (const [k, v] of Object.entries(fields)) {
-      result[k] = fromFirestoreValue(v);
-    }
-    return result;
+    return fromREST(value.mapValue.fields);
   }
-
-  if ('timestampValue' in value) {
-    return value.timestampValue;
-  }
-
-  if ('nullValue' in value) {
-    return null;
-  }
-
   return null;
 }
 
-/**
- * Convert a Firestore document to a TypeScript object.
- */
-export function fromFirestoreDocument<T>(doc: FirestoreDocument): T & { id: string } {
-  const result: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(doc.fields || {})) {
-    result[k] = fromFirestoreValue(v);
+// ---------------------------------------------------------------------------
+// firestoreDoc — PATCH a single document (idempotent upsert)
+// ---------------------------------------------------------------------------
+export async function firestoreDoc(
+  collection: string,
+  docId: string,
+  data: Record<string, unknown>,
+  idToken: string
+): Promise<void> {
+  const fields = mapToREST(data);
+  const updateMask = Object.keys(fields)
+    .map((k) => `updateMask.fieldPaths=${encodeURIComponent(k)}`)
+    .join('&');
+
+  const url = `${FIRESTORE_BASE_URL}/${collection}/${docId}?${updateMask}`;
+
+  const res = await fetch(url, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${idToken}`,
+    },
+    body: JSON.stringify({ fields }),
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    logger.error({ collection, docId, status: res.status, body }, 'Firestore PATCH failed');
+    throw new Error(`Firestore PATCH failed: ${res.status}`);
   }
-  // Extract document ID from the `name` field (e.g., "projects/foo/databases/(default)/documents/usuarios/uid123" -> "uid123")
-  const id = doc.name.split('/').pop() || '';
-  result.id = id;
-  return result as T & { id: string };
 }
 
-/**
- * Convert a TypeScript object to Firestore document format.
- */
-export function toFirestoreDocument(obj: Record<string, unknown>): { fields: Record<string, FirestoreValue> } {
-  const fields: Record<string, FirestoreValue> = {};
-  for (const [k, v] of Object.entries(obj)) {
-    if (k !== 'id') {
-      // Skip the `id` field; it's handled separately in the document path
-      fields[k] = toFirestoreValue(v);
+// ---------------------------------------------------------------------------
+// firestoreGet — GET a single document
+// ---------------------------------------------------------------------------
+export async function firestoreGet(
+  collection: string,
+  docId: string,
+  idToken: string
+): Promise<Record<string, unknown> | null> {
+  const url = `${FIRESTORE_BASE_URL}/${collection}/${docId}`;
+
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${idToken}` },
+  });
+
+  if (res.status === 404) return null;
+
+  if (!res.ok) {
+    const body = await res.text();
+    logger.error({ collection, docId, status: res.status, body }, 'Firestore GET failed');
+    throw new Error(`Firestore GET failed: ${res.status}`);
+  }
+
+  const doc = (await res.json()) as { fields?: FSFields };
+  return doc.fields ? fromREST(doc.fields) : null;
+}
+
+// ---------------------------------------------------------------------------
+// firestoreQuery — run a simple structuredQuery against a collection
+// ---------------------------------------------------------------------------
+interface QueryFilter {
+  field: string;
+  op:
+    | 'EQUAL'
+    | 'NOT_EQUAL'
+    | 'LESS_THAN'
+    | 'LESS_THAN_OR_EQUAL'
+    | 'GREATER_THAN'
+    | 'GREATER_THAN_OR_EQUAL'
+    | 'ARRAY_CONTAINS';
+  value: unknown;
+}
+
+interface QueryOptions {
+  filters?: QueryFilter[];
+  orderBy?: { field: string; direction?: 'ASCENDING' | 'DESCENDING' };
+  limit?: number;
+}
+
+export async function firestoreQuery(
+  collection: string,
+  options: QueryOptions,
+  idToken: string
+): Promise<Array<Record<string, unknown>>> {
+  const url = `${FIRESTORE_BASE_URL}:runQuery`;
+
+  const where =
+    options.filters && options.filters.length > 0
+      ? {
+          compositeFilter: {
+            op: 'AND',
+            filters: options.filters.map((f) => ({
+              fieldFilter: {
+                field: { fieldPath: f.field },
+                op: f.op,
+                value: mapToREST({ v: f.value as Record<string, unknown> })['v'],
+              },
+            })),
+          },
+        }
+      : undefined;
+
+  const body: Record<string, unknown> = {
+    structuredQuery: {
+      from: [{ collectionId: collection }],
+      ...(where ? { where } : {}),
+      ...(options.orderBy
+        ? {
+            orderBy: [
+              {
+                field: { fieldPath: options.orderBy.field },
+                direction: options.orderBy.direction ?? 'ASCENDING',
+              },
+            ],
+          }
+        : {}),
+      ...(options.limit ? { limit: options.limit } : {}),
+    },
+  };
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${idToken}`,
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    logger.error({ collection, status: res.status, text }, 'Firestore query failed');
+    throw new Error(`Firestore query failed: ${res.status}`);
+  }
+
+  const rows = (await res.json()) as Array<{ document?: { fields?: FSFields } }>;
+  return rows
+    .filter((r) => r.document?.fields)
+    .map((r) => fromREST(r.document!.fields!));
+}
+
+// ---------------------------------------------------------------------------
+// getServiceToken — obtains a short-lived access token for server-side Firestore
+// calls using the Firebase Web API key (Identity Toolkit anonymous sign-in).
+// This is only used for backend-initiated writes that don't have a user token.
+// ---------------------------------------------------------------------------
+export async function getServiceToken(): Promise<string> {
+  const res = await fetch(
+    `https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${env.FIREBASE_WEB_API_KEY}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ returnSecureToken: true }),
     }
-  }
-  return { fields };
-}
+  );
 
-/**
- * Build a Firestore document path.
- */
-export function firestoreDocPath(collection: string, docId: string): string {
-  return `${FIRESTORE_BASE_URL}/${collection}/${docId}`;
-}
-
-/**
- * Build a Firestore collection path.
- */
-export function firestoreCollectionPath(collection: string): string {
-  return `${FIRESTORE_BASE_URL}/${collection}`;
+  if (!res.ok) throw new Error('Failed to obtain service token');
+  const data = (await res.json()) as { idToken: string };
+  return data.idToken;
 }

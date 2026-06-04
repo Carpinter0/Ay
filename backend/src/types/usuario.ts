@@ -1,8 +1,8 @@
 export type PlanTier = 'gratuito' | 'romantico' | 'apasionado' | 'eterno';
 
 export interface FechaEspecial {
-  nombre: string;
-  fecha: string; // MM-DD
+  nombre: string;           // e.g. "Aniversario", "Cumpleaños de mi amor"
+  fecha: string;            // MM-DD (year-agnostic)
   recordarDiasAntes: number;
 }
 
@@ -13,8 +13,8 @@ export interface Usuario {
   fotoUrl?: string;
   stripeCustomerId?: string;
   plan: PlanTier;
-  suscripcionActivaDesde?: string; // ISO 8601
+  suscripcionActivaDesde?: string;   // ISO 8601
   fechasEspeciales?: FechaEspecial[];
-  creadoEn: string; // ISO 8601
+  creadoEn: string;                  // ISO 8601
   isActive: boolean;
 }

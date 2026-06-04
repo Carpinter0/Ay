@@ -1,25 +1,25 @@
-import { PlanTier } from './usuario.js';
+import type { PlanTier } from './usuario';
 
 export interface PagoRegistro {
   stripeInvoiceId: string;
   monto: number;
   moneda: string;
   estado: 'pagado' | 'fallido';
-  fecha: string; // ISO 8601
+  fecha: string;
 }
 
-export type SuscripcionEstado = 'activa' | 'cancelada' | 'pausada' | 'trial' | 'past_due';
+export type EstadoSuscripcion = 'activa' | 'cancelada' | 'pausada' | 'trial' | 'past_due';
 
 export interface Suscripcion {
-  id: string; // = stripeSubscriptionId
+  id: string;                          // = stripeSubscriptionId
   usuarioUid: string;
   planId: PlanTier;
   stripeSubscriptionId: string;
   stripeCustomerId: string;
-  estado: SuscripcionEstado;
-  inicioEn: string; // ISO 8601
-  proximaFacturaEn: string; // ISO 8601
-  canceladaEn?: string; // ISO 8601
+  estado: EstadoSuscripcion;
+  inicioEn: string;
+  proximaFacturaEn: string;
+  canceladaEn?: string;
   sorpresasDesbloqueadasIds: string[];
   historialPagos: PagoRegistro[];
 }

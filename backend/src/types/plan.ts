@@ -1,4 +1,4 @@
-import { PlanTier } from './usuario.js';
+import type { PlanTier } from './usuario';
 
 export interface Plan {
   id: PlanTier;

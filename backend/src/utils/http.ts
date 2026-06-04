@@ -1,41 +1,31 @@
-import { Response } from 'express';
+import type { Response } from 'express';
 
-export interface ApiResponse<T> {
-  success: boolean;
-  data?: T;
-  error?: string;
-  code?: string;
+/**
+ * Sends a successful JSON response.
+ */
+export function ok<T>(res: Response, data: T, status = 200): void {
+  res.status(status).json({ success: true, data });
 }
 
-export interface PaginatedResponse<T> {
-  success: boolean;
-  data: T[];
-  pagination: {
-    page: number;
-    perPage: number;
-    total: number;
-  };
+/**
+ * Sends an error JSON response.
+ */
+export function fail(
+  res: Response,
+  message: string,
+  status = 400,
+  code?: string
+): void {
+  res.status(status).json({ success: false, error: message, ...(code ? { code } : {}) });
 }
 
-export function ok<T>(res: Response, data: T, statusCode = 200): Response {
-  return res.status(statusCode).json({
-    success: true,
-    data,
-  } as ApiResponse<T>);
-}
-
-export function fail(res: Response, error: string, code?: string, statusCode = 400): Response {
-  return res.status(statusCode).json({
-    success: false,
-    error,
-    code,
-  });
-}
-
-export function paginated<T>(res: Response, data: T[], page: number, perPage: number, total: number, statusCode = 200): Response {
-  return res.status(statusCode).json({
-    success: true,
-    data,
-    pagination: { page, perPage, total },
-  } as PaginatedResponse<T>);
+/**
+ * Sends a paginated JSON response.
+ */
+export function paginated<T>(
+  res: Response,
+  data: T[],
+  pagination: { page: number; perPage: number; total: number }
+): void {
+  res.status(200).json({ success: true, data, pagination });
 }
