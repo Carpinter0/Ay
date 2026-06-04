@@ -1,0 +1,1 @@
+{\n  \"experimentalServices\": {\n    \"frontend\": {\n      \"root\": \"frontend\",\n      \"routePrefix\": \"/*\",\n      \"framework\": \"vite\"\n    },\n    \"backend\": {\n      \"root\": \"backend\",\n      \"routePrefix\": \"/*/_backend\"\n    }\n  }\n}\n
