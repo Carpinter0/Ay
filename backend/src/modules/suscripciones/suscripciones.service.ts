@@ -1,17 +1,49 @@
+import { z } from 'zod';
 import { stripe } from '../../utils/stripe';
 import { firestoreDoc, firestoreGet, firestoreQuery, getServiceToken } from '../../utils/firestore';
-import type { Usuario, PlanTier } from '../../types/usuario';
+import { PlanTierSchema, type PlanTier, type Usuario } from '../../types/usuario';
 import type { Plan } from '../../types/plan';
-import type { Suscripcion } from '../../types/suscripcion';
+import type { Suscripcion, PagoRegistro } from '../../types/suscripcion';
 import { env } from '../../config/env';
 import logger from '../../utils/logger';
 
-const PLAN_PRIORITY: Record<PlanTier, number> = {
+export const PLAN_PRIORITY: Record<PlanTier, number> = {
   gratuito: 0,
   romantico: 1,
   apasionado: 2,
   eterno: 3,
 };
+
+// Minimal Zod schemas for runtime validation of Firestore reads
+const PlanSchema = z.object({
+  stripePriceId: z.string(),
+  nombre: z.string(),
+});
+
+const UsuarioPartialSchema = z.object({
+  stripeCustomerId: z.string().optional(),
+  plan: PlanTierSchema,
+});
+
+const SuscripcionSchema = z.object({
+  id: z.string(),
+  usuarioUid: z.string(),
+  planId: PlanTierSchema,
+  stripeSubscriptionId: z.string(),
+  stripeCustomerId: z.string(),
+  estado: z.enum(['activa', 'cancelada', 'pausada', 'trial', 'past_due']),
+  inicioEn: z.string(),
+  proximaFacturaEn: z.string(),
+  canceladaEn: z.string().optional(),
+  sorpresasDesbloqueadasIds: z.array(z.string()),
+  historialPagos: z.array(z.object({
+    stripeInvoiceId: z.string(),
+    monto: z.number(),
+    moneda: z.string(),
+    estado: z.enum(['pagado', 'fallido']),
+    fecha: z.string(),
+  })),
+});
 
 /**
  * Creates a Stripe Checkout session for a new subscription.
@@ -25,14 +57,14 @@ export async function createCheckoutSession(
 ): Promise<{ checkoutUrl: string }> {
   const token = await getServiceToken();
 
-  // 1. Get the plan's stripePriceId
-  const planDoc = await firestoreGet('planes', planId, token);
-  if (!planDoc) throw new Error(`Plan not found: ${planId}`);
-  const plan = planDoc as unknown as Plan;
+  const planRaw = await firestoreGet('planes', planId, token);
+  if (!planRaw) throw new Error(`Plan not found: ${planId}`);
+  const plan = PlanSchema.parse(planRaw) as Pick<Plan, 'stripePriceId' | 'nombre'>;
 
-  // 2. Get or create Stripe customer
-  const userDoc = await firestoreGet('usuarios', uid, token);
-  const user = userDoc as unknown as Usuario;
+  const userRaw = await firestoreGet('usuarios', uid, token);
+  if (!userRaw) throw new Error(`User not found: ${uid}`);
+  const user = UsuarioPartialSchema.parse(userRaw) as Pick<Usuario, 'stripeCustomerId' | 'plan'>;
+
   let stripeCustomerId = user.stripeCustomerId;
 
   if (!stripeCustomerId) {
@@ -42,7 +74,6 @@ export async function createCheckoutSession(
     logger.info({ uid, stripeCustomerId }, 'Stripe customer created');
   }
 
-  // 3. Create checkout session
   const session = await stripe.checkout.sessions.create({
     mode: 'subscription',
     customer: stripeCustomerId,
@@ -53,7 +84,6 @@ export async function createCheckoutSession(
   });
 
   if (!session.url) throw new Error('Stripe did not return a checkout URL');
-
   return { checkoutUrl: session.url };
 }
 
@@ -69,9 +99,13 @@ export async function getUserSuscripcion(uid: string): Promise<Suscripcion | nul
     token
   );
 
-  const active = (rows as unknown as Suscripcion[]).find(
-    (s) => s.estado === 'activa' || s.estado === 'trial'
-  );
+  const active = rows
+    .map((r) => {
+      const parsed = SuscripcionSchema.safeParse(r);
+      return parsed.success ? parsed.data : null;
+    })
+    .filter((s): s is Suscripcion => s !== null)
+    .find((s) => s.estado === 'activa' || s.estado === 'trial');
 
   return active ?? null;
 }
@@ -97,5 +131,3 @@ export async function cancelSuscripcion(uid: string): Promise<void> {
 
   logger.info({ uid, subscriptionId: suscripcion.stripeSubscriptionId }, 'Subscription cancelled');
 }
-
-export { PLAN_PRIORITY };

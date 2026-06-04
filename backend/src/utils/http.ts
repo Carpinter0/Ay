@@ -1,27 +1,16 @@
 import type { Response } from 'express';
 
-/**
- * Sends a successful JSON response.
- */
+/** Sends a successful JSON response. */
 export function ok<T>(res: Response, data: T, status = 200): void {
   res.status(status).json({ success: true, data });
 }
 
-/**
- * Sends an error JSON response.
- */
-export function fail(
-  res: Response,
-  message: string,
-  status = 400,
-  code?: string
-): void {
-  res.status(status).json({ success: false, error: message, ...(code ? { code } : {}) });
+/** Sends an error JSON response. */
+export function fail(res: Response, error: string, status = 500, code?: string): void {
+  res.status(status).json({ success: false, error, ...(code ? { code } : {}) });
 }
 
-/**
- * Sends a paginated JSON response.
- */
+/** Sends a paginated JSON response. */
 export function paginated<T>(
   res: Response,
   data: T[],

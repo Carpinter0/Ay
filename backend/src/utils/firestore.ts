@@ -60,11 +60,9 @@ export function mapToREST(data: Record<string, unknown>): FSFields {
 // ---------------------------------------------------------------------------
 export function fromREST(fields: FSFields): Record<string, unknown> {
   const result: Record<string, unknown> = {};
-
   for (const [key, value] of Object.entries(fields)) {
     result[key] = unwrapValue(value);
   }
-
   return result;
 }
 
@@ -75,12 +73,8 @@ function unwrapValue(value: FSValue): unknown {
   if ('booleanValue' in value) return value.booleanValue;
   if ('nullValue' in value) return null;
   if ('timestampValue' in value) return value.timestampValue;
-  if ('arrayValue' in value) {
-    return (value.arrayValue.values ?? []).map(unwrapValue);
-  }
-  if ('mapValue' in value) {
-    return fromREST(value.mapValue.fields);
-  }
+  if ('arrayValue' in value) return (value.arrayValue.values ?? []).map(unwrapValue);
+  if ('mapValue' in value) return fromREST(value.mapValue.fields);
   return null;
 }
 
@@ -227,11 +221,29 @@ export async function firestoreQuery(
 }
 
 // ---------------------------------------------------------------------------
-// getServiceToken — obtains a short-lived access token for server-side Firestore
-// calls using the Firebase Web API key (Identity Toolkit anonymous sign-in).
-// This is only used for backend-initiated writes that don't have a user token.
+// getServiceToken — obtains a short-lived Firebase anonymous ID token for
+// server-initiated Firestore writes (no user token available).
+//
+// FIX: The previous version called accounts:signUp on every invocation,
+// creating a new anonymous user in Firebase Auth each time — wasting quota
+// and polluting the user table. We now cache the token in memory and only
+// refresh it 60 seconds before it expires.
 // ---------------------------------------------------------------------------
+interface CachedToken {
+  value: string;
+  expiresAt: number; // Unix ms
+}
+
+let _serviceTokenCache: CachedToken | null = null;
+
 export async function getServiceToken(): Promise<string> {
+  const now = Date.now();
+  const REFRESH_BUFFER_MS = 60_000; // refresh 60s before expiry
+
+  if (_serviceTokenCache && now < _serviceTokenCache.expiresAt - REFRESH_BUFFER_MS) {
+    return _serviceTokenCache.value;
+  }
+
   const res = await fetch(
     `https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${env.FIREBASE_WEB_API_KEY}`,
     {
@@ -242,6 +254,22 @@ export async function getServiceToken(): Promise<string> {
   );
 
   if (!res.ok) throw new Error('Failed to obtain service token');
-  const data = (await res.json()) as { idToken: string };
-  return data.idToken;
+
+  const data = (await res.json()) as { idToken: string; expiresIn: string };
+  const expiresInMs = parseInt(data.expiresIn, 10) * 1000;
+
+  _serviceTokenCache = {
+    value: data.idToken,
+    expiresAt: now + expiresInMs,
+  };
+
+  logger.info('Service token refreshed');
+  return _serviceTokenCache.value;
+}
+
+/**
+ * Clears the cached service token. Useful in tests or after a 401 response.
+ */
+export function clearServiceTokenCache(): void {
+  _serviceTokenCache = null;
 }
