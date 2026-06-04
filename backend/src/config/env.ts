@@ -1,16 +1,20 @@
-import { cleanEnv, str, port, url } from 'envalid';
+import { cleanEnv, str, port } from 'envalid';
 
-/**
- * Validates all required environment variables at startup.
- * If any are missing or malformed, the process exits with a clear error message.
- * This prevents silent failures caused by undefined env vars at runtime.
- */
 export const env = cleanEnv(process.env, {
-  FIREBASE_PROJECT_ID: str({ docs: 'Firebase Console > Project Settings > General' }),
-  FIREBASE_WEB_API_KEY: str({ docs: 'Firebase Console > Project Settings > General' }),
-  STRIPE_SECRET_KEY: str({ docs: 'Stripe Dashboard > Developers > API Keys' }),
-  STRIPE_WEBHOOK_SECRET: str({ docs: 'Stripe Dashboard > Developers > Webhooks' }),
+  // Database
+  DATABASE_URL: str(),
+
+  // JWT
+  JWT_SECRET: str(),
+  JWT_EXPIRES_IN: str({ default: '7d' }),
+
+  // Stripe
+  STRIPE_SECRET_KEY: str(),
+  STRIPE_WEBHOOK_SECRET: str(),
+
+  // App
   PORT: port({ default: 3000 }),
   NODE_ENV: str({ choices: ['development', 'production', 'test'], default: 'development' }),
-  FRONTEND_URL: url({ default: 'http://localhost:5173' }),
+  FRONTEND_URL: str({ default: 'http://localhost:5173' }),
+  ALLOWED_ORIGINS: str({ default: 'http://localhost:5173,http://localhost:3000' }),
 });

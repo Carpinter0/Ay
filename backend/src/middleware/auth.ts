@@ -1,35 +1,30 @@
-import type { Request, Response, NextFunction } from 'express';
-import { verifyIdToken } from '../config/firebase';
-import { fail } from '../utils/http';
-import logger from '../utils/logger';
+import { Request, Response, NextFunction } from 'express';
+import { verifyToken, JwtPayload } from '../config/jwt.js';
 
-/**
- * Middleware that verifies the Firebase ID token from the Authorization header.
- * On success, attaches `req.user = { uid, email }` for use in controllers.
- * On failure, responds with 401 immediately.
- *
- * Usage: router.get('/protected', auth, controller)
- */
-export async function auth(
-  req: Request,
-  res: Response,
-  next: NextFunction
-): Promise<void> {
+declare global {
+  namespace Express {
+    interface Request {
+      user?: JwtPayload;
+    }
+  }
+}
+
+export function authMiddleware(req: Request, res: Response, next: NextFunction): void {
   const authHeader = req.headers.authorization;
 
-  if (!authHeader?.startsWith('Bearer ')) {
-    fail(res, 'Missing or malformed Authorization header', 401, 'UNAUTHORIZED');
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    res.status(401).json({ success: false, error: 'Missing or invalid authorization header' });
     return;
   }
 
-  const idToken = authHeader.slice(7);
+  const token = authHeader.slice(7);
+  const payload = verifyToken(token);
 
-  try {
-    const decoded = await verifyIdToken(idToken);
-    req.user = decoded;
-    next();
-  } catch (err) {
-    logger.warn({ err }, 'Token verification failed');
-    fail(res, 'Invalid or expired token', 401, 'TOKEN_INVALID');
+  if (!payload) {
+    res.status(401).json({ success: false, error: 'Invalid token' });
+    return;
   }
+
+  req.user = payload;
+  next();
 }
