@@ -1,62 +1,35 @@
-import { Request, Response, NextFunction } from 'express';
-import { env } from '../config/env.js';
-import { IDENTITY_TOOLKIT_URL } from '../config/firebase.js';
-import { Usuario } from '../types/usuario.js';
+import type { Request, Response, NextFunction } from 'express';
+import { verifyIdToken } from '../config/firebase';
+import { fail } from '../utils/http';
+import logger from '../utils/logger';
 
-export async function verifyIdToken(token: string): Promise<Usuario | null> {
-  try {
-    const response = await fetch(`${IDENTITY_TOOLKIT_URL}/accounts:lookup`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        idToken: token,
-      }),
-    });
-
-    if (!response.ok) {
-      return null;
-    }
-
-    const data = (await response.json()) as { users?: Array<{ localId: string; email: string; displayName?: string; photoUrl?: string }> };
-    const user = data.users?.[0];
-
-    if (!user) {
-      return null;
-    }
-
-    // Return a minimal user object; the full document will be fetched from Firestore in services
-    return {
-      uid: user.localId,
-      email: user.email,
-      nombre: user.displayName || '',
-      fotoUrl: user.photoUrl,
-      plan: 'gratuito',
-      creadoEn: new Date().toISOString(),
-      isActive: true,
-    };
-  } catch (error) {
-    return null;
-  }
-}
-
-export async function authMiddleware(req: Request, res: Response, next: NextFunction): Promise<void> {
+/**
+ * Middleware that verifies the Firebase ID token from the Authorization header.
+ * On success, attaches `req.user = { uid, email }` for use in controllers.
+ * On failure, responds with 401 immediately.
+ *
+ * Usage: router.get('/protected', auth, controller)
+ */
+export async function auth(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
   const authHeader = req.headers.authorization;
 
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    res.status(401).json({ success: false, error: 'Missing or invalid authorization header' });
+  if (!authHeader?.startsWith('Bearer ')) {
+    fail(res, 'Missing or malformed Authorization header', 401, 'UNAUTHORIZED');
     return;
   }
 
-  const token = authHeader.slice(7);
-  const user = await verifyIdToken(token);
+  const idToken = authHeader.slice(7);
 
-  if (!user) {
-    res.status(401).json({ success: false, error: 'Invalid token' });
-    return;
+  try {
+    const decoded = await verifyIdToken(idToken);
+    req.user = decoded;
+    next();
+  } catch (err) {
+    logger.warn({ err }, 'Token verification failed');
+    fail(res, 'Invalid or expired token', 401, 'TOKEN_INVALID');
   }
-
-  req.user = user;
-  next();
 }
