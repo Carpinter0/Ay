@@ -1,7 +1,10 @@
-export type PlanTier = 'gratuito' | 'romantico' | 'apasionado' | 'eterno';
+import { z } from 'zod';
+
+export const PlanTierSchema = z.enum(['gratuito', 'romantico', 'apasionado', 'eterno']);
+export type PlanTier = z.infer<typeof PlanTierSchema>;
 
 export interface FechaEspecial {
-  nombre: string;           // e.g. "Aniversario", "Cumpleaños de mi amor"
+  nombre: string;           // e.g. "Aniversario"
   fecha: string;            // MM-DD (year-agnostic)
   recordarDiasAntes: number;
 }

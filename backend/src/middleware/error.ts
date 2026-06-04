@@ -1,49 +1,32 @@
-import type { Request, Response, NextFunction } from 'express';
-import { fail } from '../utils/http';
-import logger from '../utils/logger';
+import { Request, Response, NextFunction } from 'express';
+import { fail } from '../utils/http.js';
+import pino from 'pino';
 
-/**
- * Global error handler. Must be registered LAST in the Express middleware chain.
- * Catches any error thrown (or passed to `next(err)`) in route handlers.
- *
- * Maps known error types to appropriate HTTP status codes.
- * Falls back to 500 for unexpected errors and avoids leaking stack traces
- * in production.
- */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-export function errorHandler(
-  err: unknown,
-  req: Request,
-  res: Response,
-  _next: NextFunction
-): void {
-  logger.error({ err, path: req.path, method: req.method }, 'Unhandled error');
+const logger = pino();
 
-  if (res.headersSent) return;
+export class ApiError extends Error {
+  constructor(
+    public statusCode: number,
+    public code: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
 
-  if (err instanceof Error) {
-    const msg = err.message.toLowerCase();
-
-    if (msg.includes('unauthorized') || msg.includes('token')) {
-      fail(res, err.message, 401, 'UNAUTHORIZED');
-      return;
-    }
-    if (msg.includes('not found')) {
-      fail(res, err.message, 404, 'NOT_FOUND');
-      return;
-    }
-    if (msg.includes('plan upgrade required')) {
-      fail(res, err.message, 403, 'PLAN_REQUIRED');
-      return;
-    }
+export function errorHandler(err: unknown, req: Request, res: Response, next: NextFunction): void {
+  if (err instanceof ApiError) {
+    fail(res, err.message, err.code, err.statusCode);
+    return;
   }
 
-  const message =
-    process.env['NODE_ENV'] === 'production'
-      ? 'An unexpected error occurred'
-      : err instanceof Error
-        ? err.message
-        : String(err);
+  if (err instanceof Error) {
+    logger.error(err);
+    fail(res, err.message, 'INTERNAL_ERROR', 500);
+    return;
+  }
 
-  fail(res, message, 500, 'INTERNAL_ERROR');
+  logger.error('Unknown error:', err);
+  fail(res, 'Unknown error', 'INTERNAL_ERROR', 500);
 }

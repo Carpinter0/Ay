@@ -1,0 +1,134 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Usuario {
+  id                    String   @id @default(cuid())
+  email                 String   @unique
+  nombre                String
+  fotoUrl               String?
+  passwordHash          String
+  plan                  PlanTier @default(GRATUITO)
+  suscripcionActivaDesde DateTime?
+  stripeCustomerId      String?
+  isActive              Boolean  @default(true)
+  creadoEn              DateTime @default(now())
+  actualizadoEn         DateTime @updatedAt
+
+  suscripciones   Suscripcion[]
+  fechasEspeciales FechaEspecial[]
+
+  @@index([email])
+  @@map("usuarios")
+}
+
+model Plan {
+  id                    PlanTier @id
+  nombre                String
+  tagline               String
+  descripcion           String
+  precioCOP             Int
+  precioUSD             Int
+  stripePriceId         String
+  beneficios            String[]
+  sorpresasMensuales    Int
+  colorAccent           String
+  isActive              Boolean  @default(true)
+  orden                 Int
+
+  suscripciones Suscripcion[]
+  sorpresas     Sorpresa[]     @relation("planMinimo")
+
+  @@map("planes")
+}
+
+enum PlanTier {
+  GRATUITO
+  ROMANTICO
+  APASIONADO
+  ETERNO
+
+  @@map("plan_tiers")
+}
+
+model Suscripcion {
+  id                     String   @id @default(cuid())
+  usuarioId              String
+  usuario                Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  planId                 PlanTier
+  plan                   Plan     @relation(fields: [planId], references: [id])
+  stripeSubscriptionId   String   @unique
+  stripeCustomerId       String
+  estado                 String   @default("activa") // activa | cancelada | pausada | trial | past_due
+  inicioEn               DateTime @default(now())
+  proximaFacturaEn       DateTime
+  canceladaEn            DateTime?
+  sorpresasDesbloqueadas String[] @default([])
+  creadoEn               DateTime @default(now())
+  actualizadoEn          DateTime @updatedAt
+
+  pagos PagoRegistro[]
+
+  @@index([usuarioId])
+  @@index([stripeSubscriptionId])
+  @@map("suscripciones")
+}
+
+model PagoRegistro {
+  id                 String       @id @default(cuid())
+  suscripcionId      String
+  suscripcion        Suscripcion  @relation(fields: [suscripcionId], references: [id], onDelete: Cascade)
+  stripeInvoiceId    String       @unique
+  monto              Int
+  moneda             String       @default("COP")
+  estado             String       @default("pagado") // pagado | fallido
+  fecha              DateTime     @default(now())
+  creadoEn           DateTime     @default(now())
+
+  @@index([suscripcionId])
+  @@index([stripeInvoiceId])
+  @@map("pagos_registros")
+}
+
+model Sorpresa {
+  id              String   @id @default(cuid())
+  titulo          String
+  teaser          String   @db.VarChar(80)
+  descripcion     String
+  tipo            String   // mensaje | actividad | regalo_digital | reto_pareja | playlist
+  contenido       String   @db.Text
+  planMinimo      PlanTier
+  plan            Plan     @relation("planMinimo", fields: [planMinimo], references: [id])
+  imagenUrl       String?
+  etiquetas       String[]
+  temporada       String?  // san_valentin | aniversarios | navidad | todo_el_año
+  valoracionPromedio Float?
+  isActive        Boolean  @default(true)
+  creadoEn        DateTime @default(now())
+  actualizadoEn   DateTime @updatedAt
+
+  @@index([planMinimo])
+  @@index([isActive])
+  @@map("sorpresas")
+}
+
+model FechaEspecial {
+  id               String   @id @default(cuid())
+  usuarioId        String
+  usuario          Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  nombre           String
+  fecha            String   // MM-DD
+  recordarDiasAntes Int
+  creadoEn         DateTime @default(now())
+
+  @@index([usuarioId])
+  @@map("fechas_especiales")
+}

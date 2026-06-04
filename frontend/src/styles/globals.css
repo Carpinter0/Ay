@@ -1,0 +1,64 @@
+@import 'tailwindcss/base';
+@import 'tailwindcss/components';
+@import 'tailwindcss/utilities';
+
+@layer base {
+  :root {
+    --color-rose-deep: #9b2335;
+    --color-rose-medium: #c85a71;
+    --color-rose-soft: #f2a7b8;
+    --color-cream: #fdf6ec;
+    --color-champagne: #f5e6d3;
+    --color-mahogany: #4a1728;
+    --color-gold: #c9a84c;
+  }
+
+  body {
+    @apply bg-cream text-mahogany font-body;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    @apply font-display;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply px-6 py-3 bg-rose-deep text-white font-medium rounded-lg hover:bg-mahogany transition-colors;
+  }
+
+  .btn-secondary {
+    @apply px-6 py-3 bg-champagne text-mahogany font-medium rounded-lg hover:bg-rose-soft transition-colors;
+  }
+
+  .btn-ghost {
+    @apply px-6 py-3 text-rose-deep font-medium rounded-lg hover:bg-rose-soft hover:bg-opacity-30 transition-colors;
+  }
+
+  .container-page {
+    @apply max-w-7xl mx-auto px-4 sm:px-6 lg:px-8;
+  }
+
+  .card {
+    @apply bg-white rounded-lg shadow-sm border border-rose-soft border-opacity-30 p-6;
+  }
+}
+
+@keyframes float {
+  0%,
+  100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+.animate-float {
+  animation: float 3s ease-in-out infinite;
+}
