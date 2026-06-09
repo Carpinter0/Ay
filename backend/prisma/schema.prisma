@@ -1,5 +1,5 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
+// Ay Amor — Prisma Schema
+// Modelo físico: suscripción digital + fulfillment físico (flores, regalos, cuadros)
 
 generator client {
   provider = "prisma-client-js"
@@ -10,42 +10,49 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ─────────────────────────────────────────
+// USUARIO
+// ─────────────────────────────────────────
 model Usuario {
-  id                    String   @id @default(cuid())
-  email                 String   @unique
-  nombre                String
-  fotoUrl               String?
-  passwordHash          String
-  plan                  PlanTier @default(GRATUITO)
+  id                     String    @id @default(cuid())
+  email                  String    @unique
+  nombre                 String
+  fotoUrl                String?
+  passwordHash           String
+  plan                   PlanTier  @default(GRATUITO)
   suscripcionActivaDesde DateTime?
-  stripeCustomerId      String?
-  isActive              Boolean  @default(true)
-  creadoEn              DateTime @default(now())
-  actualizadoEn         DateTime @updatedAt
+  stripeCustomerId       String?
+  isActive               Boolean   @default(true)
+  creadoEn               DateTime  @default(now())
+  actualizadoEn          DateTime  @updatedAt
 
-  suscripciones   Suscripcion[]
+  suscripciones    Suscripcion[]
   fechasEspeciales FechaEspecial[]
+  direcciones      DireccionEntrega[]
 
   @@index([email])
   @@map("usuarios")
 }
 
+// ─────────────────────────────────────────
+// PLANES
+// ─────────────────────────────────────────
 model Plan {
-  id                    PlanTier @id
-  nombre                String
-  tagline               String
-  descripcion           String
-  precioCOP             Int
-  precioUSD             Int
-  stripePriceId         String
-  beneficios            String[]
-  sorpresasMensuales    Int
-  colorAccent           String
-  isActive              Boolean  @default(true)
-  orden                 Int
+  id                 PlanTier @id
+  nombre             String
+  tagline            String
+  descripcion        String
+  precioCOP          Int
+  precioUSD          Int
+  stripePriceId      String
+  beneficios         String[]
+  entregasMensuales  Int      // entregas físicas por mes
+  colorAccent        String
+  isActive           Boolean  @default(true)
+  orden              Int
 
   suscripciones Suscripcion[]
-  sorpresas     Sorpresa[]     @relation("planMinimo")
+  sorpresas     Sorpresa[]    @relation("planMinimo")
 
   @@map("planes")
 }
@@ -59,75 +66,214 @@ enum PlanTier {
   @@map("plan_tiers")
 }
 
+// ─────────────────────────────────────────
+// SUSCRIPCIÓN
+// ─────────────────────────────────────────
 model Suscripcion {
-  id                     String   @id @default(cuid())
-  usuarioId              String
-  usuario                Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
-  planId                 PlanTier
-  plan                   Plan     @relation(fields: [planId], references: [id])
-  stripeSubscriptionId   String   @unique
-  stripeCustomerId       String
-  estado                 String   @default("activa") // activa | cancelada | pausada | trial | past_due
-  inicioEn               DateTime @default(now())
-  proximaFacturaEn       DateTime
-  canceladaEn            DateTime?
-  sorpresasDesbloqueadas String[] @default([])
-  creadoEn               DateTime @default(now())
-  actualizadoEn          DateTime @updatedAt
+  id                   String    @id @default(cuid())
+  usuarioId            String
+  usuario              Usuario   @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  planId               PlanTier
+  plan                 Plan      @relation(fields: [planId], references: [id])
+  stripeSubscriptionId String    @unique
+  stripeCustomerId     String
+  estado               String    @default("activa") // activa | cancelada | pausada | trial | past_due
+  inicioEn             DateTime  @default(now())
+  proximaFacturaEn     DateTime
+  canceladaEn          DateTime?
+  creadoEn             DateTime  @default(now())
+  actualizadoEn        DateTime  @updatedAt
 
-  pagos PagoRegistro[]
+  pagos        PagoRegistro[]
+  ordenesEnvio OrdenEnvio[]
 
   @@index([usuarioId])
   @@index([stripeSubscriptionId])
   @@map("suscripciones")
 }
 
+// ─────────────────────────────────────────
+// PAGOS
+// ─────────────────────────────────────────
 model PagoRegistro {
-  id                 String       @id @default(cuid())
-  suscripcionId      String
-  suscripcion        Suscripcion  @relation(fields: [suscripcionId], references: [id], onDelete: Cascade)
-  stripeInvoiceId    String       @unique
-  monto              Int
-  moneda             String       @default("COP")
-  estado             String       @default("pagado") // pagado | fallido
-  fecha              DateTime     @default(now())
-  creadoEn           DateTime     @default(now())
+  id              String      @id @default(cuid())
+  suscripcionId   String
+  suscripcion     Suscripcion @relation(fields: [suscripcionId], references: [id], onDelete: Cascade)
+  stripeInvoiceId String      @unique
+  monto           Int
+  moneda          String      @default("COP")
+  estado          String      @default("pagado") // pagado | fallido
+  fecha           DateTime    @default(now())
+  creadoEn        DateTime    @default(now())
 
   @@index([suscripcionId])
   @@index([stripeInvoiceId])
   @@map("pagos_registros")
 }
 
+// ─────────────────────────────────────────
+// DIRECCIÓN DE ENTREGA
+// ─────────────────────────────────────────
+model DireccionEntrega {
+  id            String   @id @default(cuid())
+  usuarioId     String
+  usuario       Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+
+  // Datos del destinatario (puede ser diferente al subscriber)
+  nombreDestinatario  String
+  telefonoDestinatario String
+
+  // Dirección física
+  direccion     String
+  ciudad        String   @default("Bogotá")
+  barrio        String?
+  codigoPostal  String?
+  instrucciones String?  // "dejar con el portero", "llamar antes"
+
+  esPrincipal   Boolean  @default(false)
+  isActive      Boolean  @default(true)
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  ordenesEnvio OrdenEnvio[]
+
+  @@index([usuarioId])
+  @@map("direcciones_entrega")
+}
+
+// ─────────────────────────────────────────
+// PROVEEDOR (aliados curados)
+// ─────────────────────────────────────────
+model Proveedor {
+  id            String   @id @default(cuid())
+  nombre        String
+  tipo          TipoProveedor
+  ciudad        String
+  contactoNombre String?
+  contactoTel   String?
+  contactoEmail String?
+  direccion     String?
+  slaDias       Int      @default(2) // días máximos de entrega
+  costoBase     Int      @default(0) // costo mínimo de pedido COP
+  notas         String?
+  isActive      Boolean  @default(true)
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  ordenesEnvio OrdenEnvio[]
+
+  @@index([tipo])
+  @@index([ciudad])
+  @@map("proveedores")
+}
+
+enum TipoProveedor {
+  FLORES
+  REGALOS
+  CUADROS
+  EXPERIENCIAS
+  DULCES
+  VELAS
+  JOYERIA
+  OTRO
+
+  @@map("tipo_proveedor")
+}
+
+// ─────────────────────────────────────────
+// ORDEN DE ENVÍO (ciclo operativo mensual)
+// ─────────────────────────────────────────
+model OrdenEnvio {
+  id              String           @id @default(cuid())
+  suscripcionId   String
+  suscripcion     Suscripcion      @relation(fields: [suscripcionId], references: [id], onDelete: Cascade)
+  direccionId     String
+  direccion       DireccionEntrega @relation(fields: [direccionId], references: [id])
+  proveedorId     String?
+  proveedor       Proveedor?       @relation(fields: [proveedorId], references: [id])
+
+  estado          EstadoOrden      @default(PENDIENTE)
+  fechaProgramada DateTime         // cuándo debe llegar
+  fechaDespacho   DateTime?        // cuándo salió del proveedor
+  fechaEntrega    DateTime?        // cuándo se confirmó entrega
+
+  // Contenido del paquete
+  descripcionRegalo  String         // qué va en el paquete
+  valorRegalo        Int            // costo del regalo en COP
+  valorEmpaque       Int            @default(8000)
+  valorDomicilio     Int            @default(10000)
+  valorTotal         Int            // valorRegalo + valorEmpaque + valorDomicilio
+
+  // Seguimiento
+  codigoGuia         String?
+  operadorLogistico  String?        // "Coordinadora", "Servientrega", "iMile", "propio"
+  notaPersonal       String?        // mensaje del subscriber al destinatario
+  intentosEntrega    Int            @default(0)
+  motivoFallo        String?
+
+  // Valoración post-entrega
+  valoracionDestinatario Int?       // 1-5
+  comentarioDestinatario String?
+
+  creadoEn        DateTime         @default(now())
+  actualizadoEn   DateTime         @updatedAt
+
+  @@index([suscripcionId])
+  @@index([estado])
+  @@index([fechaProgramada])
+  @@index([proveedorId])
+  @@map("ordenes_envio")
+}
+
+enum EstadoOrden {
+  PENDIENTE         // orden creada, esperando corte
+  EN_PREPARACION    // proveedor confirmó y está armando
+  DESPACHADO        // salió del proveedor hacia el destinatario
+  ENTREGADO         // confirmación de entrega exitosa
+  FALLIDO           // intento fallido (no había nadie, dirección incorrecta)
+  CANCELADO         // cancelada antes de despachar
+
+  @@map("estado_orden")
+}
+
+// ─────────────────────────────────────────
+// SORPRESA (contenido curado)
+// ─────────────────────────────────────────
 model Sorpresa {
-  id              String   @id @default(cuid())
-  titulo          String
-  teaser          String   @db.VarChar(80)
-  descripcion     String
-  tipo            String   // mensaje | actividad | regalo_digital | reto_pareja | playlist
-  contenido       String   @db.Text
-  planMinimo      PlanTier
-  plan            Plan     @relation("planMinimo", fields: [planMinimo], references: [id])
-  imagenUrl       String?
-  etiquetas       String[]
-  temporada       String?  // san_valentin | aniversarios | navidad | todo_el_año
+  id                 String   @id @default(cuid())
+  titulo             String
+  teaser             String   @db.VarChar(80)
+  descripcion        String
+  tipo               String   // flores | regalo_fisico | cuadro | experiencia | mensaje | actividad | playlist
+  contenido          String   @db.Text
+  planMinimo         PlanTier
+  plan               Plan     @relation("planMinimo", fields: [planMinimo], references: [id])
+  imagenUrl          String?
+  etiquetas          String[]
+  temporada          String?  // san_valentin | aniversarios | navidad | todo_el_año
+  precioReferencia   Int?     // precio orientativo del regalo físico en COP
   valoracionPromedio Float?
-  isActive        Boolean  @default(true)
-  creadoEn        DateTime @default(now())
-  actualizadoEn   DateTime @updatedAt
+  isActive           Boolean  @default(true)
+  creadoEn           DateTime @default(now())
+  actualizadoEn      DateTime @updatedAt
 
   @@index([planMinimo])
   @@index([isActive])
+  @@index([tipo])
   @@map("sorpresas")
 }
 
+// ─────────────────────────────────────────
+// FECHA ESPECIAL
+// ─────────────────────────────────────────
 model FechaEspecial {
-  id               String   @id @default(cuid())
-  usuarioId        String
-  usuario          Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
-  nombre           String
-  fecha            String   // MM-DD
-  recordarDiasAntes Int
-  creadoEn         DateTime @default(now())
+  id                String   @id @default(cuid())
+  usuarioId         String
+  usuario           Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  nombre            String
+  fecha             String   // MM-DD
+  recordarDiasAntes Int      @default(3)
+  creadoEn          DateTime @default(now())
 
   @@index([usuarioId])
   @@map("fechas_especiales")
