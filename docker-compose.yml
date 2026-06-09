@@ -1,0 +1,37 @@
+version: '3.9'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ay_amor_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ayamor
+      POSTGRES_PASSWORD: ayamor_secret
+      POSTGRES_DB: ay_amor
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ayamor -d ay_amor']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Opcional: herramienta visual para explorar la base de datos
+  # Acceder en http://localhost:8080
+  # Usuario: ayamor | Contraseña: ayamor_secret | Base de datos: ay_amor
+  adminer:
+    image: adminer:latest
+    container_name: ay_amor_adminer
+    restart: unless-stopped
+    ports:
+      - '8080:8080'
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+    name: ay_amor_postgres_data
